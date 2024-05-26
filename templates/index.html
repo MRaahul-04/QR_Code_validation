@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>QR Code Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>QR Code Generator</h1>
+    <form id="qr-form">
+        <label for="url">URL:</label>
+        <input type="text" id="url" name="url" required>
+        <br>
+        <label for="expires">Expiration Date:</label>
+        <input type="datetime-local" id="expires" name="expires" required>
+        <br>
+        <button type="submit">Generate QR Code</button>
+    </form>
+    <div id="qr-result">
+        <h2>Your QR Code:</h2>
+        <img id="qr-code" src="" alt="QR Code will be displayed here">
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
