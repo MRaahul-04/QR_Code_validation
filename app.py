@@ -8,6 +8,7 @@ import uuid
 from dotenv import load_dotenv
 import pytz
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+import logging
 
 app = Flask(__name__)
 
@@ -31,9 +32,11 @@ os.makedirs(generated_codes_dir, exist_ok=True)
 # Set Indian Timezone
 indian_timezone = pytz.timezone('Asia/Kolkata')
 
+
 @app.route("/")
 def home():
     return render_template("index.html")
+
 
 @app.route("/generate", methods=["POST"])
 def generate_qr():
@@ -48,19 +51,8 @@ def generate_qr():
         # Convert expiration date string to datetime object
         expiration_date = datetime.datetime.strptime(expires, '%Y-%m-%dT%H:%M')
 
-        # Get current date in local timezone and convert to desired timezone
-        current_date_synced = datetime.datetime.now(pytz.timezone('Asia/Kolkata'))
-
-        # Convert expiration date to the desired timezone
-        expiration_date_synced = expiration_date.astimezone(pytz.timezone('Asia/Kolkata'))
-
-        print("Current Date (Synced):", current_date_synced)
-        print("Expiration Date (Synced):", expiration_date_synced)
-
-        # Check if expiration date is in the past
-        if expiration_date_synced < current_date_synced:
-            return jsonify({"error": "Expiration date cannot be in the past"}), 400
-
+        # Ensure expiration date is in local timezone
+        expiration_date_local = indian_timezone.localize(expiration_date)
     except ValueError:
         return jsonify({"error": "Invalid expiration date format"}), 400
 
@@ -70,8 +62,8 @@ def generate_qr():
     doc_ref = db.collection('qr_codes').document(doc_id)
     doc_ref.set({
         'url': url,
-        'expires': expiration_date_synced,
-        'created_at': SERVER_TIMESTAMP
+        'expires': expiration_date_local,
+        'created_at': firestore.SERVER_TIMESTAMP
     })
 
     # Generate QR code with the unique document ID
@@ -82,6 +74,40 @@ def generate_qr():
     return jsonify({"qr_code_url": f"/generated_codes/qrcode_{doc_id}.png"})
 
 
+# #############################
+# @app.route('/validate', methods=["GET"])
+# def validate_qr():
+#     doc_id = request.args.get("doc_id")
+#
+#     if not doc_id:
+#         return jsonify({"error": "Missing document ID"}), 400
+#
+#     # Retrieve the document from Firestore
+#     doc_ref = db.collection('qr_codes').document(doc_id)
+#     doc = doc_ref.get()
+#
+#     if doc.exists:
+#         data = doc.to_dict()
+#         stored_expires = data.get('expires')
+#         url = data.get('url')
+#
+#         # Check expiration date and convert expiration date and current date to Indian Timezone
+#         expiration_date = datetime.datetime.fromtimestamp(stored_expires).astimezone(indian_timezone)
+#         current_date = datetime.datetime.now(indian_timezone)
+#
+#         if current_date < expiration_date:
+#             return redirect(url)
+#         else:
+#             return jsonify({"error": "QR Code has expired"}), 403
+#     else:
+#         return jsonify({"error": "Invalid QR Code"}), 404
+# #######################
+
+
+# Configure logging to output to the console
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+
 @app.route('/validate', methods=["GET"])
 def validate_qr():
     doc_id = request.args.get("doc_id")
@@ -89,27 +115,25 @@ def validate_qr():
     if not doc_id:
         return jsonify({"error": "Missing document ID"}), 400
 
-    # Retrieve the document from Firestore
-    doc_ref = db.collection('qr_codes').document(doc_id)
-    doc = doc_ref.get()
+    # Create a query to retrieve only the documents that have not expired
+    query = db.collection('qr_codes').where('expires', '>', SERVER_TIMESTAMP)
 
-    if doc.exists:
+    # Retrieve the document from Firestore using the query
+    doc_ref = query.stream()
+    doc = None
+    for doc in doc_ref:
+        if doc.id == doc_id:
+            break
+    # Log the retrieved document
+    logging.info(f"Retrieved document: {doc.to_dict()}")
+
+    if doc:
         data = doc.to_dict()
-        stored_expires = data.get('expires')
         url = data.get('url')
 
-        # Convert stored expiration date to datetime object
-        expiration_date = datetime.datetime.fromisoformat(stored_expires)
-
-        # Get current date in local timezone
-        current_date = datetime.datetime.now()
-
-        if current_date < expiration_date:
-            return redirect(url)
-        else:
-            return jsonify({"error": "QR Code has expired"}), 403
+        return redirect(url)
     else:
-        return jsonify({"error": "Invalid QR Code"}), 404
+        return jsonify({"error": "QR Code has expired or is invalid"}), 403
 
 
 @app.route('/generated_codes/<path:filename>')
